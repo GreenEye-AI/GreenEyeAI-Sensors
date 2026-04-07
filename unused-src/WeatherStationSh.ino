@@ -31,7 +31,7 @@ WiFiClient client;
 const char *host = "api.thingspeak.com";                  
 const char *api_key ="R4WYC66FWEHP7SRH";                  
 const int httpPort = 80;
-#define pin 14       // ESP8266-12E  D5 read emperature and Humidity data
+#define DATA_PIN_23412 14       // ESP8266-12E  D5 read emperature and Humidity data
 int temp = 0; //temperature
 int humi = 0; //humidity
 void readTemperatureHumidity();
@@ -364,17 +364,17 @@ bgn:
   //Set interface mode 2 to: output
   //Output low level 20ms (>18ms)
   //Output high level 40μs
-  pinMode(pin, OUTPUT);
-  digitalWrite(pin, LOW);
+  pinMode(DATA_PIN_23412, OUTPUT);
+  digitalWrite(DATA_PIN_23412, LOW);
   delay(20);
-  digitalWrite(pin, HIGH);
+  digitalWrite(DATA_PIN_23412, HIGH);
   delayMicroseconds(40);
-  digitalWrite(pin, LOW);
+  digitalWrite(DATA_PIN_23412, LOW);
   //Set interface mode 2: input
-  pinMode(pin, INPUT);
+  pinMode(DATA_PIN_23412, INPUT);
   //High level response signal
   loopCnt = 10000;
-  while (digitalRead(pin) != HIGH){
+  while (digitalRead(DATA_PIN_23412) != HIGH){
     if (loopCnt-- == 0){
       //If don't return to high level for a long time, output a prompt and start over
       Serial.println("HIGH");
@@ -383,7 +383,7 @@ bgn:
   }
   //Low level response signal
   loopCnt = 30000;
-  while (digitalRead(pin) != LOW){
+  while (digitalRead(DATA_PIN_23412) != LOW){
     if (loopCnt-- == 0){
       //If don't return low for a long time, output a prompt and start over
       Serial.println("LOW");
@@ -392,10 +392,10 @@ bgn:
   }
   //Start reading the value of bit1-40
   for (int i = 0; i < 40; i++){
-    while (digitalRead(pin) == LOW){}
+    while (digitalRead(DATA_PIN_23412) == LOW){}
     //When the high level occurs, write down the time "time"
     time1 = micros();
-    while (digitalRead(pin) == HIGH){}
+    while (digitalRead(DATA_PIN_23412) == HIGH){}
     //When there is a low level, write down the time and subtract the time just saved
     //If the value obtained is greater than 50μs, it is ‘1’, otherwise it is ‘0’
     //And save it in an array

@@ -1,6 +1,17 @@
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 
+// ##########################################
+// настройка сенсора температуры/влажности
+#include <Adafruit_Sensor.h>
+#include <DHT.h>
+#include <DHT_U.h>
+#define DHTPIN 2
+#define DHTTYPE DHT11
+DHT_Unified dht(DHTPIN, DHTTYPE);
+uint32_t delayMS;
+// ##########################################
+
 #define START_SENSOR 0
 #define SENSORS 3
 #define BUTTON_PIN D0
@@ -17,6 +28,8 @@ u16 port        = 5000;
 
 WiFiClient client;
 WiFiServer configServer(7931);
+
+
 
 const String my_ssid = "ESP_CONIG";
 const String my_password = "34670000";
@@ -225,27 +238,82 @@ void setup() {
 	Serial.begin(115200);
 	// Serial.setDebugOutput(true);
 	Serial.println();
-	pinMode(D0, INPUT);
-	WiFi.mode(WIFI_AP_STA);
-	WiFi.softAP(my_ssid, my_password);
-	for (u32 i = 0; i < SENSORS; i++) {
-		s[i].value = getRandom(s[i].base_min, s[i].base_max);
-	}
+
+	// ##############################################
+	// инициализация сеносра DHT11
+	dht.begin();
+	Serial.println(F("DHTxx Unified Sensor Example"));
+	// Print temperature sensor details.
+	sensor_t sensor;
+	dht.temperature().getSensor(&sensor);
+	Serial.println(F("------------------------------------"));
+	Serial.println(F("Temperature Sensor"));
+	Serial.print  (F("Sensor Type: ")); Serial.println(sensor.name);
+	Serial.print  (F("Driver Ver:  ")); Serial.println(sensor.version);
+	Serial.print  (F("Unique ID:   ")); Serial.println(sensor.sensor_id);
+	Serial.print  (F("Max Value:   ")); Serial.print(sensor.max_value); Serial.println(F("°C"));
+	Serial.print  (F("Min Value:   ")); Serial.print(sensor.min_value); Serial.println(F("°C"));
+	Serial.print  (F("Resolution:  ")); Serial.print(sensor.resolution); Serial.println(F("°C"));
+	Serial.println(F("------------------------------------"));
+	// Print humidity sensor details.
+	dht.humidity().getSensor(&sensor);
+	Serial.println(F("Humidity Sensor"));
+	Serial.print  (F("Sensor Type: ")); Serial.println(sensor.name);
+	Serial.print  (F("Driver Ver:  ")); Serial.println(sensor.version);
+	Serial.print  (F("Unique ID:   ")); Serial.println(sensor.sensor_id);
+	Serial.print  (F("Max Value:   ")); Serial.print(sensor.max_value); Serial.println(F("%"));
+	Serial.print  (F("Min Value:   ")); Serial.print(sensor.min_value); Serial.println(F("%"));
+	Serial.print  (F("Resolution:  ")); Serial.print(sensor.resolution); Serial.println(F("%"));
+	Serial.println(F("------------------------------------"));
+	// Set delay between sensor readings based on sensor details.
+	delayMS = sensor.min_delay / 1000;
+	// ##############################################
+
+	// pinMode(D0, INPUT);
+	// WiFi.mode(WIFI_AP_STA);
+	// WiFi.softAP(my_ssid, my_password);
+	// for (u32 i = 0; i < SENSORS; i++) {
+	// 	s[i].value = getRandom(s[i].base_min, s[i].base_max);
+	// }
 }
 
 void loop() {
-	if (checkDoubleClick()) enterConfigMode();
-	if (!connectToWifi()) return;
-	// if (!connectToServer()) return;
+	// if (checkDoubleClick()) enterConfigMode();
+	// if (!connectToWifi()) return;
+	// // if (!connectToServer()) return;
 
-	for (u32 i = 0; i < SENSORS; i++) {
-		if (millis() - s[i].last_time < s[i].delay) continue;
-		s[i].value += getRandom(s[i].shift_min, s[i].shift_max);
-		if (s[i].value < s[i].base_min)
-			s[i].value = s[i].base_min;
-		if (s[i].value > s[i].base_max)
-			s[i].value = s[i].base_max;
-		sendSensorData(i, s[i].value);
-		s[i].last_time = millis();
+	// for (u32 i = 0; i < SENSORS; i++) {
+	// 	if (millis() - s[i].last_time < s[i].delay) continue;
+	// 	s[i].value += getRandom(s[i].shift_min, s[i].shift_max);
+	// 	if (s[i].value < s[i].base_min)
+	// 		s[i].value = s[i].base_min;
+	// 	if (s[i].value > s[i].base_max)
+	// 		s[i].value = s[i].base_max;
+	// 	sendSensorData(i, s[i].value);
+	// 	s[i].last_time = millis();
+	// }
+
+	// Delay between measurements.
+	delay(delayMS);
+	// Get temperature event and print its value.
+	sensors_event_t event;
+	dht.temperature().getEvent(&event);
+	if (isnan(event.temperature)) {
+		Serial.println(F("Error reading temperature!"));
+	}
+	else {
+		Serial.print(F("Temperature: "));
+		Serial.print(event.temperature);
+		Serial.println(F("°C"));
+	}
+	// Get humidity event and print its value.
+	dht.humidity().getEvent(&event);
+	if (isnan(event.relative_humidity)) {
+		Serial.println(F("Error reading humidity!"));
+	}
+	else {
+		Serial.print(F("Humidity: "));
+		Serial.print(event.relative_humidity);
+		Serial.println(F("%"));
 	}
 }
