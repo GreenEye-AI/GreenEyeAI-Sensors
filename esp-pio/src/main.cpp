@@ -6,7 +6,7 @@
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
 #include <DHT_U.h>
-#define DHTPIN 2
+#define DHTPIN D2
 #define DHTTYPE DHT11
 DHT_Unified dht(DHTPIN, DHTTYPE);
 uint32_t delayMS;
@@ -294,6 +294,7 @@ void loop() {
 	// }
 
 	// Delay between measurements.
+	auto start_time = millis();
 	delay(delayMS);
 	// Get temperature event and print its value.
 	sensors_event_t event;
@@ -316,4 +317,7 @@ void loop() {
 		Serial.print(event.relative_humidity);
 		Serial.println(F("%"));
 	}
+	Serial.print(millis() - start_time);
+	Serial.println(" ms");
+	Serial.println();
 }
