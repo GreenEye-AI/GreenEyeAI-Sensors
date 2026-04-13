@@ -9,7 +9,7 @@
 #define DHTPIN D2
 #define DHTTYPE DHT11
 DHT_Unified dht(DHTPIN, DHTTYPE);
-uint32_t delayMS;
+uint32_t dht_delay;
 // ##########################################
 
 #define START_SENSOR 0
@@ -266,7 +266,7 @@ void setup() {
 	Serial.print  (F("Resolution:  ")); Serial.print(sensor.resolution); Serial.println(F("%"));
 	Serial.println(F("------------------------------------"));
 	// Set delay between sensor readings based on sensor details.
-	delayMS = sensor.min_delay / 1000;
+	dht_delay = sensor.min_delay / 1000;
 	// ##############################################
 
 	// pinMode(D0, INPUT);
@@ -295,7 +295,7 @@ void loop() {
 
 	// Delay between measurements.
 	auto start_time = millis();
-	delay(delayMS);
+	delay(dht_delay);
 	// Get temperature event and print its value.
 	sensors_event_t event;
 	dht.temperature().getEvent(&event);
