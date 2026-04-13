@@ -9,17 +9,19 @@
 #define DHTPIN D2
 #define DHTTYPE DHT11
 DHT_Unified dht(DHTPIN, DHTTYPE);
-uint32_t dht_delay;
+u32 dht_delay;
+u32 last_measure_dht = 0;
 // ##########################################
-
-#define START_SENSOR 0
-#define SENSORS 3
-#define BUTTON_PIN D0
+// настройка фоторезистора
+// #define PHOTO_PIN A0
+// ##########################################
+// настройка сети
+#define BUTTON_PIN D1
 #define CONFIG_TIMEOUT_MS 60000
 #define WIFI_TIMEOUT_MS 10000
 #define WIFI_RECONNECT_MS 60000
-#define SERVER_TIMEOUT_MS 5000
-#define SERVER_RECONNECT_MS 30000
+#define SERVER_TIMEOUT_MS 1000
+// #define SERVER_RECONNECT_MS 30000
 
 String ssid     = "VNE-N41";
 String password = "34670000";
@@ -29,38 +31,15 @@ u16 port        = 5000;
 WiFiClient client;
 WiFiServer configServer(7931);
 
-
-
 const String my_ssid = "ESP_CONIG";
 const String my_password = "34670000";
 const u8 config_magic[4] = {0xDE, 0xAD, 0xBE, 0xEF};
 
-struct Sensor {
-	float value;
-	u64 last_time;
-	u64 delay;
-	float base_min; float base_max;
-	float shift_min; float shift_max;
-};
-
-Sensor s[] = {
-	{ 0.0, 0, 5000, -1000.0, 1000.0,  -10.0,  10.0 }, // pH sensor
-	{ 0.0, 0, 1000,     0.0, 1024.0, -200.0, 200.0 }, // light sensor
-	{ 0.0, 0, 1000,   -30.0,   50.0,   -1.0,   1.0 }, // T sensor
-};
-
-
-float getRandomPrecent() {
-	return rand() / (float) RAND_MAX;
-}
-
-
-float getRandom(float min, float max) {
-	return min + (max - min) * getRandomPrecent();
-}
-
-
 u64 lastWifiConnectAttempt = 0;
+u64 lastServerConnectAttempt = 0;
+// ##########################################
+
+
 bool connectToWifi() {
 	if (WiFi.isConnected()) return true;
 	if (lastWifiConnectAttempt == 0) {
@@ -85,48 +64,40 @@ bool connectToWifi() {
 	return false;
 }
 
-// u64 lastServerConnectAttempt = 0;
-// bool connectToServer() {
-// 	if (client.connected()) return true;
-// 	if (lastServerConnectAttempt == 0) {
-// 		client.connect(host, port);
-// 		lastServerConnectAttempt = millis();
-// 	} 
+bool connectToServer() {
+	if (client.connected()) return true;
+	if (lastServerConnectAttempt == 0) {
+		client.stop();
+		client.connect(host, port);
+		lastServerConnectAttempt = millis();
+	}
 
-// 	// if (millis() - lastServerConnectAttempt > SERVER_TIMEOUT_MS) {}
-// 	if (millis() - lastServerConnectAttempt > SERVER_TIMEOUT_MS 
-// 		+ SERVER_RECONNECT_MS) {
-// 		lastServerConnectAttempt = 0;
-// 	}
+	if (millis() - lastServerConnectAttempt > SERVER_TIMEOUT_MS) {
+		Serial.println("Сервер недоступен");
+		lastServerConnectAttempt = 0;
+	}
+	return false;
+}
 
-// 	return false;
-// }
 
-void sendSensorData(int sensor_id, float data) {
-	String body = "{\"sensor_id\":\"" + String(sensor_id + START_SENSOR) +
-								"\",\"data\":" + String(data) + "}";
+void sendSensorData(float temperature, float humidity) {
+	String body = "{\"device_id\":\"esp_01\","
+		"\"readings\":{\"ph\": 0.0";
+	body += ",\"temperature\":" + String(temperature);
+	body += ",\"humidity\":" + String(humidity);
+	body += ",\"light\":0,\"fan\":0}}";
+
 	int contentLength = body.length();
-	String req = "POST /data HTTP/1.1\r\n";
+	String req = "POST /api/sensors HTTP/1.1\r\n";
 	req += "Host: " + host + "\r\n";
 	req += "Content-Type: application/json\r\n";
-	req += "Connection: keep-alive\r\n";
+	req += "Connection: close\r\n";
 	req += "Content-Length: " + String(contentLength) + "\r\n";
 	req += "\r\n";
 	req += body;
 
-	// u64 start = millis();
-	while (!client.connected())
-		client.connect(host, port);
-	// Serial.print("Подключение к серверу заняло: ");
-	// Serial.print(millis() - start);
-	// Serial.println(" мс.");
 	client.print(req);
-	// while (client.available()) client.read();
-	client.stop();
-	// Serial.print("Отправлен ");
-	// Serial.print(sensor_id);
-	// Serial.print(" со значением: ");
-	// Serial.println(data);
+	while (client.available()) client.read();
 }
 
 
@@ -242,82 +213,45 @@ void setup() {
 	// ##############################################
 	// инициализация сеносра DHT11
 	dht.begin();
-	Serial.println(F("DHTxx Unified Sensor Example"));
-	// Print temperature sensor details.
 	sensor_t sensor;
 	dht.temperature().getSensor(&sensor);
-	Serial.println(F("------------------------------------"));
-	Serial.println(F("Temperature Sensor"));
-	Serial.print  (F("Sensor Type: ")); Serial.println(sensor.name);
-	Serial.print  (F("Driver Ver:  ")); Serial.println(sensor.version);
-	Serial.print  (F("Unique ID:   ")); Serial.println(sensor.sensor_id);
-	Serial.print  (F("Max Value:   ")); Serial.print(sensor.max_value); Serial.println(F("°C"));
-	Serial.print  (F("Min Value:   ")); Serial.print(sensor.min_value); Serial.println(F("°C"));
-	Serial.print  (F("Resolution:  ")); Serial.print(sensor.resolution); Serial.println(F("°C"));
-	Serial.println(F("------------------------------------"));
-	// Print humidity sensor details.
 	dht.humidity().getSensor(&sensor);
-	Serial.println(F("Humidity Sensor"));
-	Serial.print  (F("Sensor Type: ")); Serial.println(sensor.name);
-	Serial.print  (F("Driver Ver:  ")); Serial.println(sensor.version);
-	Serial.print  (F("Unique ID:   ")); Serial.println(sensor.sensor_id);
-	Serial.print  (F("Max Value:   ")); Serial.print(sensor.max_value); Serial.println(F("%"));
-	Serial.print  (F("Min Value:   ")); Serial.print(sensor.min_value); Serial.println(F("%"));
-	Serial.print  (F("Resolution:  ")); Serial.print(sensor.resolution); Serial.println(F("%"));
-	Serial.println(F("------------------------------------"));
-	// Set delay between sensor readings based on sensor details.
 	dht_delay = sensor.min_delay / 1000;
 	// ##############################################
 
-	// pinMode(D0, INPUT);
-	// WiFi.mode(WIFI_AP_STA);
-	// WiFi.softAP(my_ssid, my_password);
-	// for (u32 i = 0; i < SENSORS; i++) {
-	// 	s[i].value = getRandom(s[i].base_min, s[i].base_max);
-	// }
+	// pinMode(PHOTO_PIN, INPUT);
+	pinMode(BUTTON_PIN, INPUT);
+	WiFi.mode(WIFI_AP_STA);
+	WiFi.softAP(my_ssid, my_password);
 }
 
 void loop() {
-	// if (checkDoubleClick()) enterConfigMode();
-	// if (!connectToWifi()) return;
-	// // if (!connectToServer()) return;
+	if (checkDoubleClick()) enterConfigMode();
+	if (!connectToWifi()) return;
+	if (!connectToServer()) return;
 
-	// for (u32 i = 0; i < SENSORS; i++) {
-	// 	if (millis() - s[i].last_time < s[i].delay) continue;
-	// 	s[i].value += getRandom(s[i].shift_min, s[i].shift_max);
-	// 	if (s[i].value < s[i].base_min)
-	// 		s[i].value = s[i].base_min;
-	// 	if (s[i].value > s[i].base_max)
-	// 		s[i].value = s[i].base_max;
-	// 	sendSensorData(i, s[i].value);
-	// 	s[i].last_time = millis();
-	// }
+	if (millis() - last_measure_dht > dht_delay) {
+		last_measure_dht = millis();
+		sensors_event_t event;
+		float temperature, humidity;
+		dht.temperature().getEvent(&event);
+		if (isnan(event.temperature)) {
+			Serial.println("DHT11 недоступен");
+			return;
+		}
+		temperature = event.temperature;
+		dht.humidity().getEvent(&event);
+		if (isnan(event.relative_humidity)) {
+			Serial.println("DHT11 недоступен");
+			return;
+		}
+		humidity = event.relative_humidity;
 
-	// Delay between measurements.
-	auto start_time = millis();
-	delay(dht_delay);
-	// Get temperature event and print its value.
-	sensors_event_t event;
-	dht.temperature().getEvent(&event);
-	if (isnan(event.temperature)) {
-		Serial.println(F("Error reading temperature!"));
+		sendSensorData(temperature, humidity);
+		Serial.print("Отправка заняла: ");
+		Serial.print(millis() - lastServerConnectAttempt);
+		Serial.println(" мс.");
+		lastServerConnectAttempt = 0;
+		client.stop();
 	}
-	else {
-		Serial.print(F("Temperature: "));
-		Serial.print(event.temperature);
-		Serial.println(F("°C"));
-	}
-	// Get humidity event and print its value.
-	dht.humidity().getEvent(&event);
-	if (isnan(event.relative_humidity)) {
-		Serial.println(F("Error reading humidity!"));
-	}
-	else {
-		Serial.print(F("Humidity: "));
-		Serial.print(event.relative_humidity);
-		Serial.println(F("%"));
-	}
-	Serial.print(millis() - start_time);
-	Serial.println(" ms");
-	Serial.println();
 }
