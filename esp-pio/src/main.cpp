@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
+#include <EEPROM.h>
 
 // ##########################################
 // настройка сенсора температуры/влажности
@@ -12,9 +13,6 @@ DHT_Unified dht(DHTPIN, DHTTYPE);
 u32 dht_delay;
 u32 last_measure_dht = 0;
 // ##########################################
-// настройка фоторезистора
-// #define PHOTO_PIN A0
-// ##########################################
 // настройка сети
 #define BUTTON_PIN D1
 #define CONFIG_TIMEOUT_MS 60000
@@ -22,18 +20,23 @@ u32 last_measure_dht = 0;
 #define WIFI_RECONNECT_MS 60000
 #define SERVER_TIMEOUT_MS 1000
 // #define SERVER_RECONNECT_MS 30000
+#define MAGIC 0xEFBEADDE // b'\xDE\xAD\xBE\xEF'
 
-String ssid     = "VNE-N41";
-String password = "34670000";
-String host     = "10.21.36.131";
-u16 port        = 5000;
+struct Config {
+	unsigned int magic;
+	char ssid[33];
+	char password[65];
+	char host[65];
+	unsigned short port;
+};
+
+Config config;
 
 WiFiClient client;
 WiFiServer configServer(7931);
 
 const String my_ssid = "ESP_CONIG";
 const String my_password = "34670000";
-const u8 config_magic[4] = {0xDE, 0xAD, 0xBE, 0xEF};
 
 u64 lastWifiConnectAttempt = 0;
 u64 lastServerConnectAttempt = 0;
@@ -44,7 +47,7 @@ bool connectToWifi() {
 	if (WiFi.isConnected()) return true;
 	if (lastWifiConnectAttempt == 0) {
 		WiFi.disconnect();
-		WiFi.begin(ssid, password);
+		WiFi.begin(config.ssid, config.password);
 		lastWifiConnectAttempt = millis();
 	}
 
@@ -68,7 +71,7 @@ bool connectToServer() {
 	if (client.connected()) return true;
 	if (lastServerConnectAttempt == 0) {
 		client.stop();
-		client.connect(host, port);
+		client.connect(config.host, config.port);
 		lastServerConnectAttempt = millis();
 	}
 
@@ -88,9 +91,9 @@ void sendSensorData(float temperature, float humidity) {
 	body += ",\"light\":0,\"fan\":0}}";
 
 	int contentLength = body.length();
-	String req = "POST /api/sensors HTTP/1.1\r\n";
-	req += "Host: " + host + "\r\n";
-	req += "Content-Type: application/json\r\n";
+	String req = "POST /api/sensors HTTP/1.1\r\nHost: ";
+	req += config.host;
+	req += "\r\nContent-Type: application/json\r\n";
 	req += "Connection: close\r\n";
 	req += "Content-Length: " + String(contentLength) + "\r\n";
 	req += "\r\n";
@@ -100,6 +103,24 @@ void sendSensorData(float temperature, float humidity) {
 	while (client.available()) client.read();
 }
 
+template<typename T>
+bool recvValue(WiFiClient rc, T *str) {
+	if (rc.readBytes((char*)str, sizeof(T)) != sizeof(T))
+		return false;
+	return true;
+}
+
+bool recvString(WiFiClient rc, char *str, int max_size = -1) {
+	u8 str_size;
+	if (!recvValue(rc, &str_size))
+		return false;
+	if (max_size >= 0 && str_size > max_size) 
+		return false;
+	if (rc.readBytes(str, str_size) != str_size)
+		return false;
+	str[str_size] = 0;
+	return true;
+}
 
 void enterConfigMode() {
 	Serial.println("\n=== РЕЖИМ КОНФИГУРАЦИИ (1 минута) ===");
@@ -114,66 +135,50 @@ void enterConfigMode() {
 	bool configured = false;
 
 	while (millis() - startTime < CONFIG_TIMEOUT_MS && !configured) {
-		WiFiClient configClient = configServer.accept();
-		if (configClient) {
-			configClient.setTimeout(2000);
+		WiFiClient rc = configServer.accept();
+		if (rc) {
+			rc.setTimeout(2000);
+			Config _config;
 
-			u8 magic[4];
-			if (configClient.readBytes(magic, 4) != 4) {
-				configClient.stop(); continue; }
-			if (memcmp(magic, config_magic, 4) != 0) {
-				configClient.stop(); continue; }
+			if (!recvValue(rc, &_config.magic)) {
+				rc.stop(); continue; }
+			if (_config.magic != MAGIC) {
+				Serial.println("MAGIC пакета не совпал");
+				rc.stop(); continue; }
 
-			u8 ssid_len;
-			if (configClient.readBytes(&ssid_len, 1) != 1) {
-				configClient.stop(); continue; }
-			if (ssid_len > 32) {
-				configClient.stop(); continue; }
+			if (!recvString(rc, _config.ssid, 32)) {
+				rc.stop(); continue; }
 				
-			u8 ssid_buf[ssid_len+1];
-			if (configClient.readBytes(ssid_buf, ssid_len) != ssid_len) {
-				configClient.stop(); continue; }
-			ssid_buf[ssid_len] = 0;
+			if (!recvString(rc, _config.password, 64)) {
+				rc.stop(); continue; }
 
-			u8 pass_len;
-			if (configClient.readBytes(&pass_len, 1) != 1) {
-				configClient.stop(); continue; }
-			if (pass_len > 64) {
-				configClient.stop(); continue; }
+			if (!recvString(rc, _config.host, 64)) {
+				rc.stop(); continue; }
+			
+			if (!recvValue(rc, &_config.port)) {
+				rc.stop(); continue; }
 
-			u8 pass_buf[pass_len+1];
-			if (configClient.readBytes(pass_buf, pass_len) != pass_len) {
-				configClient.stop(); continue; }
-			pass_buf[pass_len] = 0;
+			config.magic = _config.magic;
+			config.port = _config.port;
+			strcpy(config.ssid, _config.ssid);
+			strcpy(config.password, _config.password);
+			strcpy(config.host, _config.host);
 
-			u8 host_len;
-			if (configClient.readBytes(&host_len, 1) != 1) {
-				configClient.stop(); continue; }
-			if (host_len > 64) {
-				configClient.stop(); continue; }
+			rc.stop();
+			configured = true;
 
-			u8 host_buf[host_len+1];
-			if (configClient.readBytes(host_buf, host_len) != host_len) {
-				configClient.stop(); continue; }
-			host_buf[host_len] = 0;
-
-			u8 port_bytes[2];
-			if (configClient.readBytes(port_bytes, 2) != 2) {
-				configClient.stop(); continue; }
-
-			ssid = (char*)ssid_buf;
-			password = (char*)pass_buf;
-			host = (char*)host_buf;
-			port = (port_bytes[0] << 8) | port_bytes[1];
+			EEPROM.put(0, config);
+			EEPROM.commit();
 
 			Serial.println("Новые параметры получены:");
-			Serial.println("SSID: " + ssid);
-			Serial.println("PASSWORD: " + password);
-			Serial.println("HOST: " + host);
-			Serial.println("PORT: " + String(port));
-
-			configClient.stop();
-			configured = true;
+			Serial.print("SSID: ");
+			Serial.println(config.ssid);
+			Serial.print("PASSWORD: ");
+			Serial.println(config.password);
+			Serial.print("HOST: ");
+			Serial.println(config.host);
+			Serial.print("PORT: ");
+			Serial.println(config.port);
 		}
 		delay(10);
 	}
@@ -196,20 +201,35 @@ bool checkDoubleClick() {
 		auto x = millis() - lastPressTime;
 		if (x > 100 && x < 500) {
 			lastPressTime = 0;
-			doubleClickDetected = true;
-		}
-		lastPressTime = millis();
-	}
+			doubleClickDetected = true; }
+		lastPressTime = millis(); }
 	lastButtonState = currentButtonState;
 	return doubleClickDetected;
 }
 
 void setup() {
-	srand(micros());
+	// ESP использует Little-Endian формат
 	Serial.begin(115200);
-	// Serial.setDebugOutput(true);
 	Serial.println();
-
+	// Serial.setDebugOutput(true);
+	// ##############################################
+	// инициализация случайного генератора
+	srand(micros());
+	// ##############################################
+	// инициализация памяти
+	EEPROM.begin(256);
+	EEPROM.get(0, config);
+	if (config.magic == MAGIC) {
+		Serial.println("Загружены параметры:");
+		Serial.print("SSID: ");
+		Serial.println(config.ssid);
+		Serial.print("PASSWORD: ");
+		Serial.println(config.password);
+		Serial.print("HOST: ");
+		Serial.println(config.host);
+		Serial.print("PORT: ");
+		Serial.println(config.port);
+	}
 	// ##############################################
 	// инициализация сеносра DHT11
 	dht.begin();
@@ -218,15 +238,13 @@ void setup() {
 	dht.humidity().getSensor(&sensor);
 	dht_delay = sensor.min_delay / 1000;
 	// ##############################################
-
-	// pinMode(PHOTO_PIN, INPUT);
 	pinMode(BUTTON_PIN, INPUT);
 	WiFi.mode(WIFI_AP_STA);
 	WiFi.softAP(my_ssid, my_password);
 }
 
 void loop() {
-	if (checkDoubleClick()) enterConfigMode();
+	if (checkDoubleClick() || config.magic != MAGIC) enterConfigMode();
 	if (!connectToWifi()) return;
 	if (!connectToServer()) return;
 
