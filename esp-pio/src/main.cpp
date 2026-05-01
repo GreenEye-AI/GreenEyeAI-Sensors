@@ -1,10 +1,14 @@
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <EEPROM.h>
+#include "Adafruit_SHT31.h"
 
 
+#define WATER_RELE D0
+#define LIGHT_RELE D6
+#define FAN_RELE D7
 // настройка сети
-#define BUTTON_PIN D1
+#define BUTTON_PIN D5
 #define CONFIG_TIMEOUT_MS 60000
 #define WIFI_TIMEOUT_MS 10000
 #define WIFI_RECONNECT_MS 60000
@@ -26,6 +30,11 @@ WiFiServer configServer(7931);
 
 const String my_ssid = "ESP_CONIG";
 const String my_password = "34670000";
+
+// настройка датчика SHT3x
+bool enableSensor = true;
+bool enableHeater = false;
+Adafruit_SHT31 sht31 = Adafruit_SHT31();
 
 
 u64 lastWifiConnectAttempt = 0;
@@ -64,7 +73,8 @@ bool connectToServer() {
 	}
 
 	if (millis() - lastServerConnectAttempt > SERVER_TIMEOUT_MS) {
-		Serial.println("Сервер недоступен");
+		Serial.print(millis());
+		Serial.println(" Сервер недоступен");
 		lastServerConnectAttempt = 0;
 	}
 	return false;
@@ -167,7 +177,7 @@ u64 lastPressTime = 0;
 bool lastButtonState = false;
 bool checkDoubleClick() {
 	bool doubleClickDetected = false;
-	bool currentButtonState = digitalRead(BUTTON_PIN);
+	bool currentButtonState = !digitalRead(BUTTON_PIN);
 	if (currentButtonState && !lastButtonState) {
 		auto x = millis() - lastPressTime;
 		if (x > 100 && x < 500) {
@@ -199,14 +209,67 @@ void setup() {
 	} else {
 		Serial.println("Параметры не заданы");
 	}
-	pinMode(BUTTON_PIN, INPUT);
+	pinMode(WATER_RELE, OUTPUT);
+	pinMode(LIGHT_RELE, OUTPUT);
+	pinMode(FAN_RELE, OUTPUT);
+	pinMode(BUTTON_PIN, INPUT_PULLUP);
+	client.setTimeout(10);
 	WiFi.mode(WIFI_AP_STA);
 	WiFi.softAP(my_ssid, my_password);
+	// инициализация датчика
+	Serial.println("Тест SHT3x");
+	if (sht31.begin(0x44))
+		Serial.println("Датчик подключен по 0x44");
+	else if (sht31.begin(0x45))
+		Serial.println("Датчик подключен по 0x45");
+	else {
+		Serial.println("Не удалось найти SHT3x по 0x44 | 0x45");
+		enableSensor = false;
+	}
+
+	Serial.print("Состояние обогреватея: ");
+	if (sht31.isHeaterEnabled()) {
+		enableHeater = true;
+		Serial.println("Включен");
+	} else
+		Serial.println("Выключен");
 }
 
 
+u32 lastSensorRead = 0;
+u32 lastPing = 0;
+u32 lastWaterClock = 0;
+bool waterReleState = false;
 void loop() {
+	if (millis() - lastWaterClock > 500) {
+		lastWaterClock = millis();
+		waterReleState = !waterReleState;
+		digitalWrite(WATER_RELE, waterReleState);
+		digitalWrite(LIGHT_RELE, waterReleState);
+		digitalWrite(FAN_RELE, waterReleState);
+	}
+
 	if (checkDoubleClick() || config.magic != MAGIC) enterConfigMode();
 	if (!connectToWifi()) return;
 	if (!connectToServer()) return;
+
+	if (millis() - lastPing > 4000) {
+		lastPing = millis();
+		client.print("GET /ping HTTP/1.1\r\nConnection: keep-alive\r\n\r\n");
+		while (client.available()) client.read(); 
+	}
+
+	if (millis() - lastSensorRead > 1000 && enableSensor) {
+		lastSensorRead = millis();
+		float temperature = sht31.readTemperature();
+		float humidity = sht31.readHumidity();
+		if (isnan(temperature) || isnan(humidity)) {
+			Serial.print(millis());
+			Serial.println(" Не удалось считать датчики");
+		} else {
+			Serial.println(millis());
+			Serial.printf("Температура: %.2f °C\n", temperature);
+			Serial.printf("Влажность: %.2f %%\n\n", humidity);
+		}
+	}
 }
