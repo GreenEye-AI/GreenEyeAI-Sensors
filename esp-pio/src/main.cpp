@@ -249,13 +249,13 @@ void handleServerCommands() {
 								
 								if (device == "light") {
 									light_rele_state = state;
-									digitalWrite(LIGHT_RELE, state);
+									digitalWrite(LIGHT_RELE, !light_rele_state);
 								} else if (device == "fan") {
 									fan_rele_state = state;
-									digitalWrite(FAN_RELE, state);
+									digitalWrite(FAN_RELE, !fan_rele_state);
 								} else if (device == "water") {
 									water_rele_state = state;
-									digitalWrite(WATER_RELE, state);
+									digitalWrite(WATER_RELE, !water_rele_state);
 								}
 								currentStep = SEND_ACK;
 							} else {
@@ -337,9 +337,9 @@ void setup() {
 	pinMode(WATER_RELE, OUTPUT);
 	pinMode(LIGHT_RELE, OUTPUT);
 	pinMode(FAN_RELE, OUTPUT);
-	digitalWrite(WATER_RELE, water_rele_state);
-	digitalWrite(LIGHT_RELE, light_rele_state);
-	digitalWrite(FAN_RELE, fan_rele_state);
+	digitalWrite(WATER_RELE, !water_rele_state);
+	digitalWrite(LIGHT_RELE, !light_rele_state);
+	digitalWrite(FAN_RELE, !fan_rele_state);
 	pinMode(BUTTON_PIN, INPUT_PULLUP);
 	client.setTimeout(10);
 	WiFi.mode(WIFI_AP_STA);
@@ -366,7 +366,6 @@ void setup() {
 
 u32 lastSensorRead = 0;
 u32 lastPing = 0;
-u32 lastWaterClock = 0;
 void loop() {
 	if (checkDoubleClick() || config.magic != MAGIC) enterConfigMode();
 	if (!connectToWifi()) return;
