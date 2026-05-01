@@ -2,24 +2,13 @@
 #include <ESP8266WiFi.h>
 #include <EEPROM.h>
 
-// ##########################################
-// настройка сенсора температуры/влажности
-#include <Adafruit_Sensor.h>
-#include <DHT.h>
-#include <DHT_U.h>
-#define DHTPIN D2
-#define DHTTYPE DHT11
-DHT_Unified dht(DHTPIN, DHTTYPE);
-u32 dht_delay;
-u32 last_measure_dht = 0;
-// ##########################################
+
 // настройка сети
 #define BUTTON_PIN D1
 #define CONFIG_TIMEOUT_MS 60000
 #define WIFI_TIMEOUT_MS 10000
 #define WIFI_RECONNECT_MS 60000
 #define SERVER_TIMEOUT_MS 1000
-// #define SERVER_RECONNECT_MS 30000
 #define MAGIC 0xEFBEADDE // b'\xDE\xAD\xBE\xEF'
 
 struct Config {
@@ -38,11 +27,8 @@ WiFiServer configServer(7931);
 const String my_ssid = "ESP_CONIG";
 const String my_password = "34670000";
 
+
 u64 lastWifiConnectAttempt = 0;
-u64 lastServerConnectAttempt = 0;
-// ##########################################
-
-
 bool connectToWifi() {
 	if (WiFi.isConnected()) return true;
 	if (lastWifiConnectAttempt == 0) {
@@ -67,6 +53,8 @@ bool connectToWifi() {
 	return false;
 }
 
+
+u64 lastServerConnectAttempt = 0;
 bool connectToServer() {
 	if (client.connected()) return true;
 	if (lastServerConnectAttempt == 0) {
@@ -83,32 +71,13 @@ bool connectToServer() {
 }
 
 
-void sendSensorData(float temperature, float humidity) {
-	String body = "{\"device_id\":\"esp_01\","
-		"\"readings\":{\"ph\": 0.0";
-	body += ",\"temperature\":" + String(temperature);
-	body += ",\"humidity\":" + String(humidity);
-	body += ",\"light\":0,\"fan\":0}}";
-
-	int contentLength = body.length();
-	String req = "POST /api/sensors HTTP/1.1\r\nHost: ";
-	req += config.host;
-	req += "\r\nContent-Type: application/json\r\n";
-	req += "Connection: close\r\n";
-	req += "Content-Length: " + String(contentLength) + "\r\n";
-	req += "\r\n";
-	req += body;
-
-	client.print(req);
-	while (client.available()) client.read();
-}
-
 template<typename T>
 bool recvValue(WiFiClient rc, T *str) {
 	if (rc.readBytes((char*)str, sizeof(T)) != sizeof(T))
 		return false;
 	return true;
 }
+
 
 bool recvString(WiFiClient rc, char *str, int max_size = -1) {
 	u8 str_size;
@@ -121,6 +90,7 @@ bool recvString(WiFiClient rc, char *str, int max_size = -1) {
 	str[str_size] = 0;
 	return true;
 }
+
 
 void enterConfigMode() {
 	Serial.println("\n=== РЕЖИМ КОНФИГУРАЦИИ (1 минута) ===");
@@ -192,6 +162,7 @@ void enterConfigMode() {
 	Serial.println("=== ВЫХОД ИЗ РЕЖИМА КОНФИГУРАЦИИ ===\n");
 }
 
+
 u64 lastPressTime = 0;
 bool lastButtonState = false;
 bool checkDoubleClick() {
@@ -207,15 +178,11 @@ bool checkDoubleClick() {
 	return doubleClickDetected;
 }
 
+
 void setup() {
 	// ESP использует Little-Endian формат
 	Serial.begin(115200);
 	Serial.println();
-	// Serial.setDebugOutput(true);
-	// ##############################################
-	// инициализация случайного генератора
-	srand(micros());
-	// ##############################################
 	// инициализация памяти
 	EEPROM.begin(256);
 	EEPROM.get(0, config);
@@ -229,47 +196,17 @@ void setup() {
 		Serial.println(config.host);
 		Serial.print("PORT: ");
 		Serial.println(config.port);
+	} else {
+		Serial.println("Параметры не заданы");
 	}
-	// ##############################################
-	// инициализация сеносра DHT11
-	dht.begin();
-	sensor_t sensor;
-	dht.temperature().getSensor(&sensor);
-	dht.humidity().getSensor(&sensor);
-	dht_delay = sensor.min_delay / 1000;
-	// ##############################################
 	pinMode(BUTTON_PIN, INPUT);
 	WiFi.mode(WIFI_AP_STA);
 	WiFi.softAP(my_ssid, my_password);
 }
 
+
 void loop() {
 	if (checkDoubleClick() || config.magic != MAGIC) enterConfigMode();
 	if (!connectToWifi()) return;
 	if (!connectToServer()) return;
-
-	if (millis() - last_measure_dht > dht_delay) {
-		last_measure_dht = millis();
-		sensors_event_t event;
-		float temperature, humidity;
-		dht.temperature().getEvent(&event);
-		if (isnan(event.temperature)) {
-			Serial.println("DHT11 недоступен");
-			return;
-		}
-		temperature = event.temperature;
-		dht.humidity().getEvent(&event);
-		if (isnan(event.relative_humidity)) {
-			Serial.println("DHT11 недоступен");
-			return;
-		}
-		humidity = event.relative_humidity;
-
-		sendSensorData(temperature, humidity);
-		Serial.print("Отправка заняла: ");
-		Serial.print(millis() - lastServerConnectAttempt);
-		Serial.println(" мс.");
-		lastServerConnectAttempt = 0;
-		client.stop();
-	}
 }
