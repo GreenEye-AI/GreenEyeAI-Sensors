@@ -37,7 +37,7 @@ def send_config_packet(server_ip, server_port, new_ssid, new_password, new_host,
 	packet += pass_bytes
 	packet += struct.pack('B', len(host_bytes))   # 1 байт длины хоста
 	packet += host_bytes
-	packet += struct.pack('>H', new_port)         # 2 байта порта (big-endian)
+	packet += struct.pack('<H', new_port)  # 2 байта порта (little-endian)
 
 	# Отправка
 	sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
