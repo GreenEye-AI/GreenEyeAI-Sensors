@@ -2,6 +2,7 @@
 #include <ESP8266WiFi.h>
 #include <EEPROM.h>
 #include "Adafruit_SHT31.h"
+#include <ArduinoJson.h>
 
 
 #define WATER_RELE D0
@@ -14,6 +15,10 @@
 #define WIFI_RECONNECT_MS 60000
 #define SERVER_TIMEOUT_MS 1000
 #define MAGIC 0xEFBEADDE // b'\xDE\xAD\xBE\xEF'
+
+bool water_rele_state = false;
+bool light_rele_state = false;
+bool fan_rele_state = false;
 
 struct Config {
 	unsigned int magic;
@@ -173,6 +178,126 @@ void enterConfigMode() {
 }
 
 
+enum CommandStep { IDLE, WAIT_COMMAND, SEND_ACK };
+CommandStep currentStep = IDLE;
+unsigned long lastActionTime = 0;
+unsigned long lastCmdCheck = 0;
+int pendingCommandId = -1;
+int queueSize = 0;
+
+void handleServerCommands() {
+	if (!client.connected()) {
+		currentStep = IDLE;
+		return;
+	}
+
+	switch (currentStep) {
+		case IDLE: {
+			if (millis() - lastCmdCheck < 5000 && queueSize <= 0) return;
+			
+			lastCmdCheck = millis();
+			client.print(
+				"GET /api/esp/command HTTP/1.1\r\n"  
+				"Connection: keep-alive\r\n\r\n"
+			);
+			
+			currentStep = WAIT_COMMAND;
+			lastActionTime = millis();
+			Serial.print(millis());
+			Serial.println(" Запрос отправлен");
+			break;
+		}
+
+		case WAIT_COMMAND:
+			if (client.available()) {
+				int contentLength = 0;
+				bool endOfHeaders = false;
+
+				// 1. Парсинг HTTP заголовков
+				while (client.available() && !endOfHeaders) {
+					String line = client.readStringUntil('\n');
+					line.trim(); // Удаляем \r
+					if (line.length() == 0) {
+						endOfHeaders = true; // Нашли \r\n\r\n
+					} else if (line.startsWith("Content-Length:")) {
+						contentLength = line.substring(15).toInt();
+					}
+				}
+
+				// 2. Чтение тела JSON на основе Content-Length
+				if (endOfHeaders && contentLength > 0) {
+					JsonDocument doc;
+					DeserializationError error = deserializeJson(doc, client);
+
+					if (error == DeserializationError::Ok) {
+						// 3. Проверка типов данных
+						bool typesValid = doc["device"].is<String>() && 
+						                  doc["action"].is<String>() && 
+						                  doc["id"].is<int>() && 
+						                  doc["queue_size"].is<int>();
+
+						if (typesValid) {
+							String device = doc["device"]; 
+							String action = doc["action"]; 
+							pendingCommandId = doc["id"];       
+							queueSize = doc["queue_size"];
+							Serial.print("Очередь: ");
+							Serial.println(queueSize);
+
+							if (device != "None") {
+								bool state = (action == "on");
+								
+								if (device == "light") {
+									light_rele_state = state;
+									digitalWrite(LIGHT_RELE, state);
+								} else if (device == "fan") {
+									fan_rele_state = state;
+									digitalWrite(FAN_RELE, state);
+								} else if (device == "water") {
+									water_rele_state = state;
+									digitalWrite(WATER_RELE, state);
+								}
+								currentStep = SEND_ACK;
+							} else {
+								currentStep = IDLE; 
+							}
+						} else {
+							Serial.println("Ошибка: неверные типы данных в JSON");
+							currentStep = IDLE;
+						}
+					} else {
+						Serial.print("Ошибка десериализации: ");
+						Serial.println(error.c_str());
+						currentStep = IDLE;
+					}
+				}
+			} else if (millis() - lastActionTime > 2000) {
+				currentStep = IDLE; 
+			}
+			break;
+
+		case SEND_ACK: {
+			JsonDocument ackDoc;
+			ackDoc["id"] = pendingCommandId; 
+
+			String requestBody;
+			serializeJson(ackDoc, requestBody);
+
+			String headers = "POST /api/esp/command HTTP/1.1\r\n";
+			headers += "Content-Type: application/json\r\n";
+			headers += "Content-Length: " + String(requestBody.length()) + "\r\n";
+			headers += "Connection: keep-alive\r\n\r\n";
+
+			client.print(headers + requestBody);
+
+			currentStep = IDLE; 
+			if (queueSize > 0) lastCmdCheck = 0; 
+			break;
+		}
+	}
+}
+
+
 u64 lastPressTime = 0;
 bool lastButtonState = false;
 bool checkDoubleClick() {
@@ -212,6 +337,9 @@ void setup() {
 	pinMode(WATER_RELE, OUTPUT);
 	pinMode(LIGHT_RELE, OUTPUT);
 	pinMode(FAN_RELE, OUTPUT);
+	digitalWrite(WATER_RELE, water_rele_state);
+	digitalWrite(LIGHT_RELE, light_rele_state);
+	digitalWrite(FAN_RELE, fan_rele_state);
 	pinMode(BUTTON_PIN, INPUT_PULLUP);
 	client.setTimeout(10);
 	WiFi.mode(WIFI_AP_STA);
@@ -239,25 +367,21 @@ void setup() {
 u32 lastSensorRead = 0;
 u32 lastPing = 0;
 u32 lastWaterClock = 0;
-bool waterReleState = false;
 void loop() {
-	if (millis() - lastWaterClock > 500) {
-		lastWaterClock = millis();
-		waterReleState = !waterReleState;
-		digitalWrite(WATER_RELE, waterReleState);
-		digitalWrite(LIGHT_RELE, waterReleState);
-		digitalWrite(FAN_RELE, waterReleState);
-	}
-
 	if (checkDoubleClick() || config.magic != MAGIC) enterConfigMode();
 	if (!connectToWifi()) return;
 	if (!connectToServer()) return;
 
 	if (millis() - lastPing > 4000) {
 		lastPing = millis();
-		client.print("GET /ping HTTP/1.1\r\nConnection: keep-alive\r\n\r\n");
+		client.print(
+			"GET /ping HTTP/1.1\r\n"
+			"Connection: keep-alive\r\n\r\n"
+		);
 		while (client.available()) client.read(); 
 	}
+
+	handleServerCommands();
 
 	if (millis() - lastSensorRead > 1000 && enableSensor) {
 		lastSensorRead = millis();
