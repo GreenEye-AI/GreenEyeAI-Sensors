@@ -4,8 +4,10 @@
 #include "Adafruit_SHT31.h"
 #include <ArduinoJson.h>
 
+// D1 - SCL
+// D2 - SDA
 
-#define WATER_RELE D0
+#define WATER_RELE D4
 #define LIGHT_RELE D6
 #define FAN_RELE D7
 // настройка сети
@@ -334,12 +336,12 @@ void setup() {
 	} else {
 		Serial.println("Параметры не заданы");
 	}
-	pinMode(WATER_RELE, OUTPUT);
-	pinMode(LIGHT_RELE, OUTPUT);
-	pinMode(FAN_RELE, OUTPUT);
-	digitalWrite(WATER_RELE, !water_rele_state);
-	digitalWrite(LIGHT_RELE, !light_rele_state);
-	digitalWrite(FAN_RELE, !fan_rele_state);
+	pinMode(WATER_RELE, OUTPUT_OPEN_DRAIN);
+	pinMode(LIGHT_RELE, OUTPUT_OPEN_DRAIN);
+	pinMode(FAN_RELE, OUTPUT_OPEN_DRAIN);
+	digitalWrite(WATER_RELE, 0);
+	digitalWrite(LIGHT_RELE, 0);
+	digitalWrite(FAN_RELE, 0);
 	pinMode(BUTTON_PIN, INPUT_PULLUP);
 	client.setTimeout(10);
 	WiFi.mode(WIFI_AP_STA);
@@ -367,6 +369,18 @@ void setup() {
 u32 lastSensorRead = 0;
 u32 lastPing = 0;
 void loop() {
+	if (millis() - lastPing > 2000) {
+		lastPing = millis();
+		water_rele_state = !water_rele_state;
+		Serial.print(millis());
+		Serial.print(' ');
+		Serial.println(water_rele_state);
+		digitalWrite(WATER_RELE, !water_rele_state);
+		digitalWrite(LIGHT_RELE, !water_rele_state);
+		digitalWrite(FAN_RELE, !water_rele_state);
+	}
+	return;
+	
 	if (checkDoubleClick() || config.magic != MAGIC) enterConfigMode();
 	if (!connectToWifi()) return;
 	if (!connectToServer()) return;
@@ -386,13 +400,32 @@ void loop() {
 		lastSensorRead = millis();
 		float temperature = sht31.readTemperature();
 		float humidity = sht31.readHumidity();
+		
 		if (isnan(temperature) || isnan(humidity)) {
 			Serial.print(millis());
 			Serial.println(" Не удалось считать датчики");
-		} else {
-			Serial.println(millis());
-			Serial.printf("Температура: %.2f °C\n", temperature);
-			Serial.printf("Влажность: %.2f %%\n\n", humidity);
+			return;
 		}
+
+		Serial.println(millis());
+		Serial.printf("Температура: %.2f °C\n", temperature);
+		Serial.printf("Влажность: %.2f %%\n\n", humidity);
+		
+		JsonDocument ackDoc;
+		ackDoc["temperature"] = temperature; 
+		ackDoc["humidity"] = humidity; 
+
+		String requestBody;
+		serializeJson(ackDoc, requestBody);
+
+		String headers = "POST /api/esp/sensors HTTP/1.1\r\n";
+		headers += "Content-Type: application/json\r\n";
+		headers += "Content-Length: " + String(requestBody.length()) + "\r\n";
+		headers += "Connection: keep-alive\r\n\r\n";
+
+		client.print(headers + requestBody);
+		while (client.available()) client.read(); 
 	}
 }
+
+// python conf.py --server-host 192.168.1.1 --ssid ПОДКЛЮЧИСЬ --password 12345678 --port 5000 --host 10.117.102.89
