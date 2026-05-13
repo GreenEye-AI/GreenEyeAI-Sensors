@@ -8,10 +8,11 @@
 // D2 - SDA
 
 #define WATER_RELE D4
+#define BUTTON_PIN D5
 #define LIGHT_RELE D6
 #define FAN_RELE D7
+
 // настройка сети
-#define BUTTON_PIN D5
 #define CONFIG_TIMEOUT_MS 60000
 #define WIFI_TIMEOUT_MS 10000
 #define WIFI_RECONNECT_MS 60000
@@ -369,18 +370,6 @@ void setup() {
 u32 lastSensorRead = 0;
 u32 lastPing = 0;
 void loop() {
-	if (millis() - lastPing > 2000) {
-		lastPing = millis();
-		water_rele_state = !water_rele_state;
-		Serial.print(millis());
-		Serial.print(' ');
-		Serial.println(water_rele_state);
-		digitalWrite(WATER_RELE, !water_rele_state);
-		digitalWrite(LIGHT_RELE, !water_rele_state);
-		digitalWrite(FAN_RELE, !water_rele_state);
-	}
-	return;
-	
 	if (checkDoubleClick() || config.magic != MAGIC) enterConfigMode();
 	if (!connectToWifi()) return;
 	if (!connectToServer()) return;
@@ -427,5 +416,3 @@ void loop() {
 		while (client.available()) client.read(); 
 	}
 }
-
-// python conf.py --server-host 192.168.1.1 --ssid ПОДКЛЮЧИСЬ --password 12345678 --port 5000 --host 10.117.102.89
