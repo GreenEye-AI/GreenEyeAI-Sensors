@@ -385,7 +385,7 @@ void loop() {
 
 	handleServerCommands();
 
-	if (millis() - lastSensorRead > 1000 && enableSensor) {
+	if (millis() - lastSensorRead > 3'600'000 && enableSensor) {
 		lastSensorRead = millis();
 		float temperature = sht31.readTemperature();
 		float humidity = sht31.readHumidity();
