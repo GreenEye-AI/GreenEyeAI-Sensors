@@ -340,9 +340,9 @@ void setup() {
 	pinMode(WATER_RELE, OUTPUT_OPEN_DRAIN);
 	pinMode(LIGHT_RELE, OUTPUT_OPEN_DRAIN);
 	pinMode(FAN_RELE, OUTPUT_OPEN_DRAIN);
-	digitalWrite(WATER_RELE, 0);
-	digitalWrite(LIGHT_RELE, 0);
-	digitalWrite(FAN_RELE, 0);
+	digitalWrite(WATER_RELE, 1);
+	digitalWrite(LIGHT_RELE, 1);
+	digitalWrite(FAN_RELE, 1);
 	pinMode(BUTTON_PIN, INPUT_PULLUP);
 	client.setTimeout(10);
 	WiFi.mode(WIFI_AP_STA);
@@ -385,7 +385,8 @@ void loop() {
 
 	handleServerCommands();
 
-	if (millis() - lastSensorRead > 3'600'000 && enableSensor) {
+	// опрос сенсора раз в 15 минут
+	if (millis() - lastSensorRead > 900'000 && enableSensor) {
 		lastSensorRead = millis();
 		float temperature = sht31.readTemperature();
 		float humidity = sht31.readHumidity();
