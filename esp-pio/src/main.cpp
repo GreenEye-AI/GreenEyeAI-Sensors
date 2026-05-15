@@ -4,11 +4,11 @@
 #include "Adafruit_SHT31.h"
 #include <ArduinoJson.h>
 
+
 // D1 - SCL
 // D2 - SDA
-
-#define WATER_RELE D4
-#define BUTTON_PIN D5
+#define BUTTON_PIN D4
+#define WATER_RELE D5
 #define LIGHT_RELE D6
 #define FAN_RELE D7
 
@@ -196,7 +196,7 @@ void handleServerCommands() {
 
 	switch (currentStep) {
 		case IDLE: {
-			if (millis() - lastCmdCheck < 5000 && queueSize <= 0) return;
+			if (millis() - lastCmdCheck < 3'000 && queueSize <= 0) return;
 			
 			lastCmdCheck = millis();
 			client.print(
@@ -292,6 +292,7 @@ void handleServerCommands() {
 			headers += "Connection: keep-alive\r\n\r\n";
 
 			client.print(headers + requestBody);
+			while (client.available()) client.read(); 
 
 			currentStep = IDLE; 
 			if (queueSize > 0) lastCmdCheck = 0; 
@@ -339,10 +340,10 @@ void setup() {
 	}
 	pinMode(WATER_RELE, OUTPUT_OPEN_DRAIN);
 	pinMode(LIGHT_RELE, OUTPUT_OPEN_DRAIN);
-	pinMode(FAN_RELE, OUTPUT_OPEN_DRAIN);
-	digitalWrite(WATER_RELE, 1);
-	digitalWrite(LIGHT_RELE, 1);
-	digitalWrite(FAN_RELE, 1);
+	pinMode(FAN_RELE,   OUTPUT_OPEN_DRAIN);
+	digitalWrite(WATER_RELE, HIGH);
+	digitalWrite(LIGHT_RELE, HIGH);
+	digitalWrite(FAN_RELE,   HIGH);
 	pinMode(BUTTON_PIN, INPUT_PULLUP);
 	client.setTimeout(10);
 	WiFi.mode(WIFI_AP_STA);
@@ -374,7 +375,7 @@ void loop() {
 	if (!connectToWifi()) return;
 	if (!connectToServer()) return;
 
-	if (millis() - lastPing > 4000) {
+	if (millis() - lastPing > 4'000) {
 		lastPing = millis();
 		client.print(
 			"GET /ping HTTP/1.1\r\n"
