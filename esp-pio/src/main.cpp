@@ -387,7 +387,7 @@ void loop() {
 	handleServerCommands();
 
 	// опрос сенсора раз в 15 минут
-	if (millis() - lastSensorRead > 900'000 && enableSensor) {
+	if (millis() - lastSensorRead > 600'000 && enableSensor) {
 		lastSensorRead = millis();
 		float temperature = sht31.readTemperature();
 		float humidity = sht31.readHumidity();
